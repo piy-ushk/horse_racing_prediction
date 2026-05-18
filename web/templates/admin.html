@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}管理画面 — 競馬予想システム{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2 style="margin-bottom:6px">管理画面</h2>
+  <p style="color:#666;font-size:.9em">オペレーター専用 — オッズ取得時刻・システム設定</p>
+</div>
+
+{% if updated %}
+<div class="card" style="background:#d4edda;border:1px solid #c3e6cb;padding:14px 20px">
+  <strong style="color:#155724">設定を保存しました。</strong> Windowsタスクスケジューラも更新されました。
+</div>
+{% endif %}
+{% if error %}
+<div class="card" style="background:#f8d7da;border:1px solid #f5c6cb;padding:14px 20px">
+  <strong style="color:#721c24">入力エラー:</strong> 時刻の値が正しくありません (0〜23時、0〜59分)。
+</div>
+{% endif %}
+
+<!-- Schedule time -->
+<div class="card">
+  <h3 style="margin-bottom:16px">オッズ取得時刻</h3>
+  <p style="color:#555;font-size:.9em;margin-bottom:16px">
+    毎日この時刻にオッズを一括取得し、印を確定します。変更後はWindowsタスクスケジューラに自動反映されます。
+  </p>
+  <form method="POST" action="/admin/schedule" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <label style="font-weight:600">時刻:</label>
+    <input type="number" name="hour" min="0" max="23" value="{{ scheduled_hour }}"
+           style="width:64px;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:1rem;text-align:center">
+    <span style="font-size:1.2rem;font-weight:bold">:</span>
+    <input type="number" name="minute" min="0" max="59" value="{{ '%02d' % scheduled_minute }}"
+           style="width:64px;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:1rem;text-align:center">
+    <button type="submit" class="btn btn-success">保存・タスク更新</button>
+    <span style="font-size:.85em;color:#888">現在: {{ '%02d'|format(scheduled_hour) }}:{{ '%02d'|format(scheduled_minute) }}</span>
+  </form>
+</div>
+
+<!-- System status -->
+<div class="card">
+  <h3 style="margin-bottom:16px">システム状態</h3>
+  <table style="width:100%">
+    <thead>
+      <tr><th style="text-align:left">項目</th><th style="text-align:left">状態</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>デモモード (DEMO_MODE)</td>
+        <td>
+          {% if demo_mode %}
+            <span style="color:#856404;background:#fff3cd;padding:2px 10px;border-radius:12px;font-size:.85em;font-weight:600">ON — モックデータを使用中</span>
+          {% else %}
+            <span style="color:#155724;background:#d4edda;padding:2px 10px;border-radius:12px;font-size:.85em;font-weight:600">OFF — 本番APIを使用</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>WordPress (WP_BASE_URL)</td>
+        <td style="font-family:monospace;font-size:.9em">{{ wp_url }}</td>
+      </tr>
+      <tr>
+        <td>WordPress 認証情報</td>
+        <td>
+          {% if wp_configured %}
+            <span style="color:#155724">設定済み</span>
+          {% else %}
+            <span style="color:#721c24">未設定 — .env に WP_USERNAME / WP_APP_PASSWORD を記入</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>JRA-VAN 利用キー</td>
+        <td>
+          {% if jravan_key_set %}
+            <span style="color:#155724">設定済み (3UJC-****)</span>
+          {% else %}
+            <span style="color:#721c24">未設定 — .env に JRAVAN_LICENSE_KEY を記入</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>JRA-VAN ソフトウェアID</td>
+        <td>
+          {% if jravan_key_set %}
+            <span style="color:#555">JRAVAN_SOFTWARE_ID を確認 (.env)</span>
+          {% else %}
+            <span style="color:#721c24">未設定</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>UmaConn 利用キー</td>
+        <td>
+          {% if umaconn_key_set %}
+            <span style="color:#155724">設定済み (EMPC-****)</span>
+          {% else %}
+            <span style="color:#721c24">未設定 — .env に UMACONN_API_KEY を記入</span>
+          {% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Task Scheduler status -->
+{% if task_status %}
+<div class="card">
+  <h3 style="margin-bottom:12px">Windowsタスクスケジューラ — HorseRacingPrediction</h3>
+  <pre style="background:#f7f7f7;padding:14px;border-radius:6px;font-size:.82em;overflow-x:auto;white-space:pre-wrap">{{ task_status }}</pre>
+</div>
+{% else %}
+<div class="card" style="background:#fff3cd">
+  <p style="color:#856404">
+    タスクスケジューラに HorseRacingPrediction タスクが見つかりません。<br>
+    管理者権限のターミナルで以下を実行してください:
+  </p>
+  <pre style="background:#1a1a2e;color:#e0e0e0;padding:14px;border-radius:6px;margin-top:12px;font-size:.9em">python scheduler/setup_windows_task.py</pre>
+</div>
+{% endif %}
+
+<!-- Manual pipeline -->
+<div class="card">
+  <h3 style="margin-bottom:12px">手動実行</h3>
+  <p style="color:#555;font-size:.9em;margin-bottom:14px">テスト用: 今すぐパイプラインを実行します（本日の予想がまだない場合のみ生成されます）。</p>
+  <form method="POST" action="/run">
+    <button type="submit" class="btn btn-primary">▶ パイプライン手動実行</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}操作ログ — {{ date }}{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2 style="margin-bottom:4px">操作ログ</h2>
+  <p style="color:#666;font-size:.9rem">{{ date }}</p>
+</div>
+<div class="card">
+  <pre style="white-space:pre-wrap;font-size:.85rem;color:#1a1a2e;line-height:1.7;font-family:'Consolas',monospace">{{ content }}</pre>
+</div>
+<a href="/" class="btn btn-primary">← ダッシュボードへ戻る</a>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ race.race_name }} 予想{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+    <div>
+      <h2 style="margin-bottom:4px">{{ race.race_name }} 予想</h2>
+      <p style="color:#666;font-size:.9rem">{{ race.race_date }} | {{ race.venue }} {{ race.race_number }}R</p>
+    </div>
+    {% if demo_mode %}<span class="badge badge-demo">DEMO MODE</span>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom:16px">本命・対抗</h3>
+  <div style="display:flex;gap:20px;flex-wrap:wrap">
+    {% for p in predictions %}
+    {% if p.mark %}
+    <div style="text-align:center;padding:16px 20px;border:2px solid #e0e0e0;border-radius:10px;min-width:100px">
+      <div class="mark mark-{{ p.rank }}" style="font-size:2em">{{ p.mark }}</div>
+      <div style="font-weight:600;margin-top:6px">{{ p.horse_name }}</div>
+      <div style="font-size:.85rem;color:#666">馬番 {{ p.horse_number }}</div>
+      <div style="font-size:.85rem;color:#27ae60;font-weight:600">{{ "%.1f"|format(p.odds) }}倍</div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom:16px">全馬一覧</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>順位</th>
+        <th>馬番</th>
+        <th>馬名</th>
+        <th>オッズ</th>
+        <th>印</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in predictions %}
+      <tr {% if p.mark %}style="font-weight:600"{% endif %}>
+        <td>{{ p.rank }}</td>
+        <td>{{ p.horse_number }}</td>
+        <td style="text-align:left">{{ p.horse_name }}</td>
+        <td>{{ "%.1f"|format(p.odds) }}倍</td>
+        <td>
+          {% if p.mark %}
+          <span class="mark mark-{{ p.rank }}">{{ p.mark }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin-top:12px;font-size:.8rem;color:#999">
+    ※ 予想は当日{{ scheduled_time }}時点のオッズに基づいています。以降のオッズ変動は反映されません。
+  </p>
+</div>
+
+<a href="/" class="btn btn-primary">← ダッシュボードへ戻る</a>
+{% endblock %}

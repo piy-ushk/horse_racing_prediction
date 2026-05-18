@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}アクセス拒否{% endblock %}
+
+{% block content %}
+<div class="card" style="text-align:center;padding:64px 32px">
+  <div style="font-size:3rem;margin-bottom:16px">🔒</div>
+  <h2 style="margin-bottom:12px">アクセスが制限されています</h2>
+  <p style="color:#666;margin-bottom:8px">このページはLINEリッチメニューからのみアクセス可能です。</p>
+  <p style="color:#999;font-size:.85rem">URLに <code>?auth=line_only</code> パラメータが必要です。</p>
+  <div style="margin-top:32px;padding:16px;background:#f8f8f8;border-radius:8px;display:inline-block">
+    <code style="font-size:.9rem;color:#e74c3c">HTTP 403 Forbidden</code>
+  </div>
+</div>
+{% endblock %}

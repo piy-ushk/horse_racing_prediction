@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード — 競馬予想システム{% endblock %}
+
+{% block content %}
+<div class="card" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+  <div>
+    <h2 style="margin-bottom:6px">本日の予想  <span style="font-size:1rem;font-weight:400;color:#666">{{ today }}</span></h2>
+    {% if demo_mode %}<span class="badge badge-demo">DEMO MODE</span>{% endif %}
+  </div>
+  <form method="POST" action="/run">
+    <button type="submit" class="btn btn-success">▶ パイプライン実行</button>
+  </form>
+</div>
+
+{% if not race_data %}
+<div class="card" style="text-align:center;padding:48px">
+  <p style="font-size:1.1rem;color:#666">本日の予想データがありません。</p>
+  <p style="margin-top:12px;color:#999;font-size:.9rem">「パイプライン実行」ボタンを押してデータを生成してください。</p>
+</div>
+{% else %}
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px">
+  {% for item in race_data %}
+  {% set race = item.race %}
+  <div class="card" style="padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="font-size:1.1rem">{{ race.race_name }}</h3>
+      <span style="font-size:.8rem;color:#999">{{ race.venue }} {{ race.race_number }}R</span>
+    </div>
+
+    <!-- Top marks summary -->
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      {% for p in item.marked %}
+      <div style="text-align:center;min-width:60px">
+        <div class="mark mark-{{ p.rank }}">{{ p.mark }}</div>
+        <div style="font-size:.78rem;color:#333;margin-top:2px">{{ p.horse_name }}</div>
+        <div style="font-size:.72rem;color:#999">{{ "%.1f"|format(p.odds) }}倍</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <a href="/race/{{ race.race_id }}?{{ auth_param }}={{ auth_value }}"
+       class="btn btn-primary" style="width:100%;text-align:center">詳細を見る</a>
+
+    <p style="margin-top:8px;font-size:.75rem;color:#bbb;text-align:center">
+      LINE専用URL付きでアクセス制限中
+    </p>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Access restriction demo -->
+<div class="card" style="margin-top:8px">
+  <h3 style="margin-bottom:12px">アクセス制限のデモ</h3>
+  <p style="color:#555;font-size:.9rem;margin-bottom:14px">
+    予想ページは <code>?auth=line_only</code> パラメータがないとブロックされます。
+  </p>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    {% if race_data %}
+    {% set first_race = race_data[0].race %}
+    <a href="/race/{{ first_race.race_id }}?auth=line_only" class="btn btn-success">
+      ✓ 正しいURL (アクセス可)
+    </a>
+    <a href="/race/{{ first_race.race_id }}" class="btn"
+       style="background:#e74c3c;color:#fff">
+      ✗ パラメータなし (アクセス拒否)
+    </a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
