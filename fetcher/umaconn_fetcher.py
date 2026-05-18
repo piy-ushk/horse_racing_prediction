@@ -1,20 +1,22 @@
 """
-UmaConn 地方競馬DATA HTTP API fetcher.
+UmaConn 地方競馬DATA fetcher — Windows COM DLL (NVDTLabLib.NVLink).
 
-Production: calls the UmaConn REST API to get local/regional race odds.
-  Credentials required:
-    UMACONN_API_KEY  — issued by UmaConn (set in .env)
-    UMACONN_BASE_URL — API base URL (default: https://api.umaconn.com/v1)
+UmaConn is NOT an HTTP API. It is a local Windows COM library, mirroring
+JV-Link but for regional/local racing (地方競馬). Method names use the
+"NV" prefix instead of "JV".
 
-Demo mode (DEMO_MODE=true): no-op; the JV-Link mock data is sufficient
-for demo purposes.
+Requirements:
+  - UmaConn software installed: C:\\Windows\\SysWOW64\\NVDTLab.dll
+  - License key (UMACONN_API_KEY) registered via the UmaConn GUI first run
+  - 32-bit Python (the DLL is 32-bit only; 64-bit Python cannot load it)
+  - pip install pywin32  (32-bit build)
 
-UmaConn API reference: https://www.umaconn.com/api/docs
-  Key endpoints used here:
-    GET /races?date=YYYYMMDD           — list all local races for a date
-    GET /odds/{race_id}                — win odds for each horse in a race
+COM ProgID : NVDTLabLib.NVLink
+Init param : "UNKNOWN"  (literal string — the key is stored by the GUI)
+
+Reference  : https://qiita.com/masachaco/items/7aa4afa4ca70d4eb93d9
+             https://gist.github.com/miyamamoto/cbe26d18173fce119a3f6ef56e31d9d5
 """
-import os
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,99 +25,190 @@ from logger.operation_logger import get_logger
 
 log = get_logger()
 
+# NVLink dataspec for win/place odds — mirrors JV-Link "0B11"
+# Confirm the exact code against the UmaConn official data spec PDF.
+_DATASPEC_ODDS = "0B11"
+_NV_BUFFER_SIZE = 110000
+
 
 def enrich_odds(races: list, horses_by_race: dict) -> dict:
     """
-    Fetch local/regional race data from UmaConn and merge into horses_by_race.
-    For central JRA races already present, only adds UmaConn races/odds that
-    were not already captured by JV-Link.
+    Fetch local/regional race odds from UmaConn COM and merge into horses_by_race.
+    In demo mode this is a no-op; the JV-Link mock data is sufficient.
     Returns the (possibly enriched) horses_by_race dict.
     """
     if config.DEMO_MODE:
-        log.info("UmaConn: DEMO MODE — skipping enrichment")
+        log.info("UmaConn: DEMO MODE — skipping")
         return horses_by_race
-    return _umaconn_enrich(races, horses_by_race)
+    return _nvlink_fetch(races, horses_by_race)
 
 
-def _umaconn_enrich(races: list, horses_by_race: dict) -> dict:
-    import requests
+def _nvlink_fetch(races: list, horses_by_race: dict) -> dict:
+    """
+    Real UmaConn integration via Windows COM (NVDTLabLib.NVLink).
 
-    api_key = config.UMACONN_API_KEY
-    base_url = config.UMACONN_BASE_URL.rstrip("/")
+    Data flow (mirrors JV-Link exactly, with NV prefix):
+      NVInit("UNKNOWN")        — initialise (license resolved from GUI setup)
+      NVOpen(dataspec, ...)    — open a data stream for today's odds
+      loop NVRead(...)         — read fixed-width NVDATA records
+      NVClose()                — release the connection
 
-    if not api_key:
-        log.warning("UmaConn: UMACONN_API_KEY not set — skipping")
-        return horses_by_race
+    NOTE: This DLL is 32-bit only. You must run Python (x86) 32-bit.
+    """
+    try:
+        import win32com.client
+    except ImportError:
+        raise RuntimeError(
+            "pywin32 is required. Run: pip install pywin32  "
+            "(use the 32-bit Python installer — NVDTLab.dll is 32-bit only)"
+        )
 
-    headers = {
-        "X-API-Key": api_key,
-        "Accept": "application/json",
-    }
-
-    # Determine the race date from the first race in the list
     race_date = races[0]["race_date"].replace("-", "") if races else ""
     if not race_date:
         return horses_by_race
 
-    # Step 1: fetch all local races for the day
-    try:
-        resp = requests.get(
-            f"{base_url}/races",
-            params={"date": race_date},
-            headers=headers,
-            timeout=15,
+    fromtime = f"{race_date}000000"  # YYYYMMDDHHMMSS
+
+    log.info("UmaConn: connecting to COM server (NVDTLabLib.NVLink)...")
+    nvlink = win32com.client.Dispatch("NVDTLabLib.NVLink")
+
+    rc = nvlink.NVInit("UNKNOWN")
+    if rc != 0:
+        raise RuntimeError(
+            f"NVInit failed — code {rc}. "
+            "Open the UmaConn GUI once to complete the initial setup and "
+            "register the license key (UMACONN_API_KEY)."
         )
-        resp.raise_for_status()
-        local_races = resp.json()  # list of race objects from UmaConn
-    except Exception as exc:
-        log.warning("UmaConn: failed to fetch race list — %s", exc)
-        return horses_by_race
 
-    # Step 2: for each local race, fetch odds and merge
-    for lr in local_races:
-        race_id = str(lr.get("race_id", ""))
-        if not race_id:
-            continue
+    log.info("UmaConn: opening odds stream (dataspec=%s from=%s)...", _DATASPEC_ODDS, fromtime)
+    rc, read_count, dl_count, last_ts = nvlink.NVOpen(
+        _DATASPEC_ODDS, fromtime, 4, 0, 0, ""
+    )
+    if rc < 0:
+        raise RuntimeError(f"NVOpen failed — code {rc}")
 
-        # Build a race dict compatible with our schema if not already present
-        if race_id not in horses_by_race:
-            races.append({
-                "race_id": race_id,
-                "race_name": lr.get("race_name", race_id),
-                "race_date": races[0]["race_date"] if races else "",
-                "venue": lr.get("venue", ""),
-                "race_number": int(lr.get("race_number", 0)),
-            })
-            horses_by_race[race_id] = []
+    new_races: list[dict] = []
+    new_horses: dict[str, list] = {}
 
-        try:
-            resp = requests.get(
-                f"{base_url}/odds/{race_id}",
-                headers=headers,
-                timeout=15,
-            )
-            resp.raise_for_status()
-            odds_data = resp.json()  # {horse_id: {horse_name, horse_number, odds}, ...}
-        except Exception as exc:
-            log.warning("UmaConn: failed to fetch odds for race %s — %s", race_id, exc)
-            continue
+    try:
+        while True:
+            rc, buff, size, filename = nvlink.NVRead("", _NV_BUFFER_SIZE, "")
+            if rc == 0:
+                break
+            if rc < 0:
+                log.error("UmaConn: NVRead error — code %d", rc)
+                break
 
-        existing_ids = {h["horse_id"] for h in horses_by_race[race_id]}
-        for horse_id, info in odds_data.items():
-            if horse_id in existing_ids:
-                # Update existing odds if UmaConn value is more recent
-                for h in horses_by_race[race_id]:
-                    if h["horse_id"] == horse_id:
-                        h["odds"] = float(info.get("odds", h["odds"]))
-                        break
-            else:
-                horses_by_race[race_id].append({
-                    "horse_id": horse_id,
+            parsed = _parse_odds_record(buff, race_date)
+            if parsed is None:
+                continue
+
+            race_id = parsed["race_id"]
+            if race_id not in new_horses:
+                new_races.append({
                     "race_id": race_id,
-                    "horse_name": info.get("horse_name", ""),
-                    "horse_number": int(info.get("horse_number", 0)),
-                    "odds": float(info.get("odds", 0)),
+                    "race_name": parsed["race_name"],
+                    "race_date": parsed["race_date"],
+                    "venue": parsed["venue"],
+                    "race_number": parsed["race_number"],
                 })
-        log.info("UmaConn: enriched race %s — %d horses", race_id, len(horses_by_race[race_id]))
+                new_horses[race_id] = []
 
+            new_horses[race_id].append({
+                "horse_id": parsed["horse_id"],
+                "race_id": race_id,
+                "horse_name": parsed["horse_name"],
+                "horse_number": parsed["horse_number"],
+                "odds": parsed["odds"],
+            })
+    finally:
+        nvlink.NVClose()
+
+    # Merge local races into the existing dict (which may contain JRA races)
+    for race in new_races:
+        rid = race["race_id"]
+        if rid not in horses_by_race:
+            races.append(race)
+            horses_by_race[rid] = new_horses[rid]
+            log.info(
+                "UmaConn: added local race %s — %d horses",
+                race["race_name"], len(new_horses[rid]),
+            )
+        else:
+            # Update odds for horses already present from JV-Link
+            existing = {h["horse_id"]: h for h in horses_by_race[rid]}
+            for h in new_horses[rid]:
+                if h["horse_id"] in existing:
+                    existing[h["horse_id"]]["odds"] = h["odds"]
+                else:
+                    horses_by_race[rid].append(h)
+
+    log.info("UmaConn: fetch complete — %d local races", len(new_races))
     return horses_by_race
+
+
+def _parse_odds_record(buff: str, race_date: str) -> dict | None:
+    """
+    Parse one NVDATA odds record.
+
+    The NVDATA format mirrors the JRA-VAN JVDATA layout.
+    Field offsets follow the UmaConn data specification PDF.
+    Adjust slice indices if the official spec differs from JV-Link.
+    """
+    if not buff or len(buff) < 30:
+        return None
+    try:
+        record_type = buff[0:2].strip()
+        if record_type not in ("0B", "OB"):
+            return None
+
+        venue_code   = buff[12:14].strip()
+        race_num_str = buff[14:16].strip()
+        horse_num_str = buff[16:18].strip()
+
+        if not race_num_str.isdigit() or not horse_num_str.isdigit():
+            return None
+
+        race_number  = int(race_num_str)
+        horse_number = int(horse_num_str)
+
+        horse_name_raw = buff[18:54]
+        try:
+            horse_name = horse_name_raw.encode("latin-1").decode("cp932").strip()
+        except Exception:
+            horse_name = horse_name_raw.strip()
+
+        odds_raw = buff[54:58].strip()
+        odds = int(odds_raw) / 10.0 if odds_raw.isdigit() else 0.0
+        if odds <= 0:
+            return None
+
+        venue_name = _LOCAL_VENUE_CODE_MAP.get(venue_code, venue_code)
+        fmt_date   = f"{race_date[:4]}-{race_date[4:6]}-{race_date[6:8]}"
+        race_id    = f"{race_date}_{venue_code}_{race_number:02d}"
+        horse_id   = f"{race_id}_H{horse_number:02d}"
+
+        return {
+            "race_id":     race_id,
+            "race_name":   f"{venue_name}{race_number}R",
+            "race_date":   fmt_date,
+            "venue":       venue_name,
+            "race_number": race_number,
+            "horse_id":    horse_id,
+            "horse_name":  horse_name,
+            "horse_number": horse_number,
+            "odds":        odds,
+        }
+    except Exception as exc:
+        log.debug("UmaConn: failed to parse record — %s", exc)
+        return None
+
+
+# UmaConn local venue codes (地方競馬場コード)
+_LOCAL_VENUE_CODE_MAP = {
+    "30": "門別",   "31": "岩手盛岡", "32": "水沢",
+    "35": "浦和",   "36": "船橋",     "37": "大井",   "38": "川崎",
+    "42": "金沢",   "43": "笠松",     "44": "名古屋",
+    "46": "園田",   "47": "姫路",
+    "48": "高知",   "50": "佐賀",
+}

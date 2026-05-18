@@ -92,10 +92,17 @@
         <td>UmaConn 利用キー</td>
         <td>
           {% if umaconn_key_set %}
-            <span style="color:#155724">設定済み (EMPC-****)</span>
+            <span style="color:#155724">設定済み (EMPC-****) — COM DLL経由で使用</span>
           {% else %}
-            <span style="color:#721c24">未設定 — .env に UMACONN_API_KEY を記入</span>
+            <span style="color:#721c24">未設定 — .env に UMACONN_API_KEY を記入し、UmaConn GUIで初回登録を完了させてください</span>
           {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>UmaConn 動作要件</td>
+        <td style="font-size:.85em;color:#555">
+          NVDTLab.dll (COM) — <strong>32ビットPython必須</strong> /
+          C:\Windows\SysWOW64\NVDTLab.dll がインストール済みであること
         </td>
       </tr>
     </tbody>

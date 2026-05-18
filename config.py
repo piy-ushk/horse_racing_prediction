@@ -27,9 +27,9 @@ AUTH_VALUE = "line_only"
 JRAVAN_LICENSE_KEY = os.getenv("JRAVAN_LICENSE_KEY", "")
 JRAVAN_SOFTWARE_ID = os.getenv("JRAVAN_SOFTWARE_ID", "")
 
-# UmaConn 地方競馬DATA HTTP API
+# UmaConn 地方競馬DATA — Windows COM DLL (NVDTLabLib.NVLink), NOT an HTTP API.
+# License key is registered via the UmaConn GUI on first run.
 UMACONN_API_KEY = os.getenv("UMACONN_API_KEY", "")
-UMACONN_BASE_URL = os.getenv("UMACONN_BASE_URL", "https://api.umaconn.com/v1")
 
 # Demo mode: uses mock data instead of real JV-Link / UmaConn
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"

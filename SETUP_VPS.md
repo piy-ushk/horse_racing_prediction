@@ -17,22 +17,38 @@
 
 ## 2. Python のインストール
 
-1. https://www.python.org/downloads/ から Python 3.11+ をダウンロード
+> **重要:** UmaConn (NVDTLab.dll) は **32ビットDLL** です。
+> UmaConn を使う場合は必ず **Python 3.11 (32ビット / x86)** をインストールしてください。
+> 64ビットPythonではDLLをロードできません。
+
+1. https://www.python.org/downloads/ → **Windows installer (32-bit)** を選択してダウンロード
 2. インストール時に **「Add Python to PATH」にチェックを入れる**
-3. インストール後、確認:
+3. インストール後、確認（`32 bit` と表示されること）:
    ```
    python --version
    ```
 
 ---
 
-## 3. JV-Link のセットアップ
+## 3. JV-Link / UmaConn のセットアップ
+
+### JV-Link (JRA-VAN 中央競馬)
 
 1. JRA-VAN Data Lab ページからJV-Linkインストーラーをダウンロード
 2. インストール後、JV-Link管理画面を起動
 3. **利用キー `3UJC-3XNU-1KME-U68B-4` を登録**
 4. データ取得テストを実行して正常に動作することを確認
 5. JRA-VANより発行される **ソフトウェアID** を `.env` の `JRAVAN_SOFTWARE_ID` に記入
+
+### UmaConn (地方競馬DATA)
+
+> UmaConn は **HTTPサービスではありません**。JV-Linkと同様の Windows COM DLL です。
+> (`C:\Windows\SysWOW64\NVDTLab.dll` / COM ProgID: `NVDTLabLib.NVLink`)
+
+1. 競馬最強の法則WEB（saikyo.k-ba.com）からUmaConnインストーラーをダウンロード
+2. インストール後、UmaConnを**一度GUIで起動**し、利用キー `EMPC-3PAB-9TLY-L4UX-8` を登録
+3. 初回セットアップを完了する（この手順を踏まないとNVInitが失敗します）
+4. `C:\Windows\SysWOW64\NVDTLab.dll` が存在することを確認
 
 ---
 
@@ -64,8 +80,7 @@ WP_USERNAME=（WordPressユーザー名）
 WP_APP_PASSWORD=（アプリケーションパスワード — 下記参照）
 JRAVAN_LICENSE_KEY=3UJC-3XNU-1KME-U68B-4
 JRAVAN_SOFTWARE_ID=（JRA-VANより発行）
-UMACONN_API_KEY=EMPC-3PAB-9TLY-L4UX-8
-UMACONN_BASE_URL=https://api.umaconn.com/v1
+UMACONN_API_KEY=EMPC-3PAB-9TLY-L4UX-8  # COM DLL経由 — URLは不要
 DEMO_MODE=false
 SCHEDULED_HOUR=9
 SCHEDULED_MINUTE=30
