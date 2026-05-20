@@ -2,6 +2,15 @@
 
 本番稼働のための手順書です。ConoHa VPS（Windows Server）上での作業を想定しています。
 
+> **自動セットアップ (推奨):**  
+> プロジェクトを `C:\keiba\horce_racing_prediction\` にコピーした後、管理者PowerShellで:
+> ```powershell
+> Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+> .\setup\vps_setup.ps1
+> ```
+> Python 32-bit・依存パッケージ・COM登録確認・デモテストまで自動実行されます。  
+> 以下の手順書は各ステップの詳細説明です。
+
 ---
 
 ## 1. 前提条件の確認
@@ -133,6 +142,13 @@ python scripts/test_wp_connection.py
 
 # パイプライン全体のスモークテスト（デモモード）
 python scripts/test_pipeline.py
+
+# JV-Link + UmaConn 実接続テスト（DEMO_MODE=false 設定後）
+python scripts/test_connections.py
+
+# 個別テスト
+python scripts/test_connections.py --jvlink-only
+python scripts/test_connections.py --umaconn-only
 ```
 
 ---
