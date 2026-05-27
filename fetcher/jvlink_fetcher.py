@@ -88,6 +88,9 @@ def _jvlink_fetch(race_date: str):
     log.info("JV-Link: opening real-time odds stream (dataspec=%s)...", _DATASPEC_ODDS)
     rc = jvlink.JVRTOpen(_DATASPEC_ODDS, "")
     if rc < 0:
+        if rc == -114:
+            log.warning("JV-Link: No live JRA data available today (normal for weekdays).")
+            return [], {}
         raise RuntimeError(f"JVRTOpen failed — code {rc}")
 
     races: list[dict] = []

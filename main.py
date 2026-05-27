@@ -28,7 +28,7 @@ from publisher.wordpress import publish_race
 log = get_logger()
 
 
-def run(race_date: str = None):
+def run(race_date: str | None = None):
     if race_date is None:
         race_date = date.today().strftime("%Y-%m-%d")
 
@@ -45,14 +45,14 @@ def run(race_date: str = None):
         log.info("Predictions already exist for %s — skipping (fixed result)", race_date)
         return
 
-    # Phase 2: Fetch odds
+    # Phase 2: Fetch odds (JRA from JV-Link + Local from UmaConn)
     races, horses_by_race = fetch_races_and_odds(race_date)
-    if not races:
-        log.warning("No races fetched for %s — pipeline aborted", race_date)
-        return
-    log.info("Odds fetched successfully — %d races", len(races))
-
     horses_by_race = enrich_odds(races, horses_by_race)
+
+    if not races:
+        log.warning("No JRA or local races fetched for %s — pipeline aborted", race_date)
+        return
+    log.info("Odds fetched successfully — %d races total", len(races))
 
     # Phase 3 + 4: Generate predictions and save
     all_predictions = []
