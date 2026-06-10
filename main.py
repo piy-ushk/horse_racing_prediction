@@ -47,7 +47,7 @@ def run(race_date: str | None = None):
 
     # Phase 2: Fetch odds (JRA from JV-Link + Local from UmaConn)
     races, horses_by_race = fetch_races_and_odds(race_date)
-    horses_by_race = enrich_odds(races, horses_by_race)
+    horses_by_race = enrich_odds(races, horses_by_race, race_date)
 
     if not races:
         log.warning("No JRA or local races fetched for %s — pipeline aborted", race_date)

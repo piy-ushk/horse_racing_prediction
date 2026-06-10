@@ -63,7 +63,7 @@ def _jvlink_fetch(race_date: str):
     Field offsets are defined in the official JRA-VAN data layout document.
     """
     try:
-        import win32com.client
+        import win32com.client  # type: ignore
     except ImportError:
         raise RuntimeError(
             "pywin32 is required for JV-Link. "

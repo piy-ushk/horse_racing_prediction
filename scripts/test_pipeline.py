@@ -42,7 +42,7 @@ def run_smoke_test():
 
     # Enrich (no-op in demo)
     print("[3] UmaConn enrichment (demo no-op)...")
-    horses_by_race = enrich_odds(races, horses_by_race)
+    horses_by_race = enrich_odds(races, horses_by_race, TEST_DATE)
     print("    OK")
 
     # Generate predictions

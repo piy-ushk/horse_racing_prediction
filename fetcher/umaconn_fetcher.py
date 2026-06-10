@@ -31,7 +31,7 @@ _DATASPEC_ODDS = "0B11"
 _NV_BUFFER_SIZE = 110000
 
 
-def enrich_odds(races: list, horses_by_race: dict) -> dict:
+def enrich_odds(races: list, horses_by_race: dict, target_date: str) -> dict:
     """
     Fetch local/regional race odds from UmaConn COM and merge into horses_by_race.
     In demo mode this is a no-op; the JV-Link mock data is sufficient.
@@ -40,10 +40,10 @@ def enrich_odds(races: list, horses_by_race: dict) -> dict:
     if config.DEMO_MODE:
         log.info("UmaConn: DEMO MODE — skipping")
         return horses_by_race
-    return _nvlink_fetch(races, horses_by_race)
+    return _nvlink_fetch(races, horses_by_race, target_date)
 
 
-def _nvlink_fetch(races: list, horses_by_race: dict) -> dict:
+def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
     """
     Real UmaConn integration via Windows COM (NVDTLabLib.NVLink).
 
@@ -56,18 +56,15 @@ def _nvlink_fetch(races: list, horses_by_race: dict) -> dict:
     NOTE: This DLL is 32-bit only. You must run Python (x86) 32-bit.
     """
     try:
-        import win32com.client
+        import win32com.client  # type: ignore
     except ImportError:
         raise RuntimeError(
             "pywin32 is required. Run: pip install pywin32  "
             "(use the 32-bit Python installer — NVDTLab.dll is 32-bit only)"
         )
 
-    race_date = races[0]["race_date"].replace("-", "") if races else ""
-    if not race_date:
-        return horses_by_race
-
-    fromtime = f"{race_date}000000"  # YYYYMMDDHHMMSS
+    race_date_str = target_date.replace("-", "")
+    fromtime = f"{race_date_str}000000"  # YYYYMMDDHHMMSS
 
     log.info("UmaConn: connecting to COM server (NVDTLabLib.NVLink)...")
     nvlink = win32com.client.Dispatch("NVDTLabLib.NVLink")
@@ -85,6 +82,9 @@ def _nvlink_fetch(races: list, horses_by_race: dict) -> dict:
         _DATASPEC_ODDS, fromtime, 4, 0, 0, ""
     )
     if rc < 0:
+        if rc == -301:
+            log.warning("UmaConn: No live local data available today or outside racing hours.")
+            return horses_by_race
         raise RuntimeError(f"NVOpen failed — code {rc}")
 
     new_races: list[dict] = []
@@ -99,7 +99,7 @@ def _nvlink_fetch(races: list, horses_by_race: dict) -> dict:
                 log.error("UmaConn: NVRead error — code %d", rc)
                 break
 
-            parsed = _parse_odds_record(buff, race_date)
+            parsed = _parse_odds_record(buff, race_date_str)
             if parsed is None:
                 continue
 
