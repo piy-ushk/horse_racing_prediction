@@ -41,7 +41,7 @@ def _check_32bit():
 
 def _check_pywin32():
     try:
-        import win32com.client  # noqa: F401
+        import win32com.client  # type: ignore  # noqa: F401
         print(f"{PASS} pywin32 available")
         return True
     except ImportError:
@@ -98,7 +98,7 @@ def test_jvlink() -> bool:
         return False
 
     try:
-        import win32com.client
+        import win32com.client  # type: ignore
         print(f"{INFO} Creating COM object JVDTLab.JVLink...")
         jvlink = win32com.client.Dispatch("JVDTLab.JVLink")
 
@@ -144,7 +144,7 @@ def test_umaconn() -> bool:
         return False
 
     try:
-        import win32com.client
+        import win32com.client  # type: ignore
         print(f"{INFO} Creating COM object NVDTLabLib.NVLink...")
         nvlink = win32com.client.Dispatch("NVDTLabLib.NVLink")
 
@@ -159,16 +159,36 @@ def test_umaconn() -> bool:
             return False
 
         # Try opening a data stream briefly
-        from datetime import date
-        fromtime = date.today().strftime("%Y%m%d") + "000000"
-        print(f"{INFO} Opening odds stream (NVOpen dataspec=0B11 from={fromtime})...")
+        from datetime import date, timedelta
+        fromtime = (date.today() - timedelta(days=2)).strftime("%Y%m%d") + "000000"
+        print(f"{INFO} Opening stream (NVOpen dataspec=RACE from={fromtime})...")
         try:
-            rc, read_count, dl_count, last_ts = nvlink.NVOpen("0B11", fromtime, 4, 0, 0, "")
+            rc, read_count, dl_count, last_ts = nvlink.NVOpen("RACE", fromtime, 1, 0, 0, "")
             if rc >= 0:
                 print(f"{PASS} NVOpen succeeded (rc={rc}, records={read_count}) — data stream accessible")
+            elif rc in (-301, -1):
+                print(f"{INFO} NVOpen returned {rc} (download/connection in progress). Waiting for completion...")
+                import time
+                start_time = time.time()
+                timeout = 60
+                completed = False
+                while time.time() - start_time < timeout:
+                    status = nvlink.NVStatus()
+                    if status == 0:
+                        completed = True
+                        print(f"{PASS} NVOpen download completed successfully")
+                        break
+                    elif status > 0:
+                        print(f"{INFO} Downloading... {status}%")
+                    else:
+                        print(f"{FAIL} Download status failed: {status}")
+                        break
+                    time.sleep(2)
+                
+                if not completed:
+                    print(f"{WARN} NVOpen download timed out or did not return success status.")
             else:
-                print(f"{WARN} NVOpen returned {rc} — may be outside racing hours or no live data today")
-                print("       This is expected on non-race days. NVInit passed so authentication is OK.")
+                print(f"{FAIL} NVOpen returned {rc}")
         finally:
             try:
                 nvlink.NVClose()

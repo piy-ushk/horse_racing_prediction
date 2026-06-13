@@ -25,9 +25,9 @@ from logger.operation_logger import get_logger
 
 log = get_logger()
 
-# NVLink dataspec for win/place odds — mirrors JV-Link "0B11"
-# Confirm the exact code against the UmaConn official data spec PDF.
-_DATASPEC_ODDS = "0B11"
+# For UmaConn, dataspecs use strings like "RACE" instead of JV-Link's "0B11"
+# TODO: Verify if UmaConn requires a different string specifically for Odds, or if "RACE" includes it.
+_DATASPEC_ODDS = "RACE"
 _NV_BUFFER_SIZE = 110000
 
 
@@ -79,12 +79,31 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
 
     log.info("UmaConn: opening odds stream (dataspec=%s from=%s)...", _DATASPEC_ODDS, fromtime)
     rc, read_count, dl_count, last_ts = nvlink.NVOpen(
-        _DATASPEC_ODDS, fromtime, 4, 0, 0, ""
+        _DATASPEC_ODDS, fromtime, 1, 0, 0, ""
     )
-    if rc < 0:
-        if rc == -301:
-            log.warning("UmaConn: No live local data available today or outside racing hours.")
+    if rc in (-301, -1) or dl_count > 0:
+        log.info("UmaConn: Data download/connection in progress (rc=%d, dl_count=%d). Waiting for completion...", rc, dl_count)
+        import time
+        start_time = time.time()
+        timeout = 180  # 3 minutes timeout
+        completed = False
+        while time.time() - start_time < timeout:
+            status = nvlink.NVStatus()
+            if status == 0:
+                completed = True
+                log.info("UmaConn: Download completed successfully.")
+                break
+            elif status > 0:
+                log.info("UmaConn: Downloading... %d%%", status)
+            else:
+                log.error("UmaConn: Download failed with status %d", status)
+                break
+            time.sleep(2)
+        
+        if not completed:
+            log.warning("UmaConn: No live local data available today or outside racing hours (timed out or failed).")
             return horses_by_race
+    elif rc < 0:
         raise RuntimeError(f"NVOpen failed — code {rc}")
 
     new_races: list[dict] = []
@@ -92,14 +111,24 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
 
     try:
         while True:
+            # NVGets throws COM exceptions, so we use NVRead which returns the whole file payload
             rc, buff, size, filename = nvlink.NVRead("", _NV_BUFFER_SIZE, "")
             if rc == 0:
                 break
+            if rc == -1:
+                continue
+            if rc == -3:
+                import time
+                time.sleep(1)
+                continue
             if rc < 0:
                 log.error("UmaConn: NVRead error — code %d", rc)
                 break
 
-            parsed = _parse_odds_record(buff, race_date_str)
+            # The payload might contain multiple records concatenated.
+            # For now, we attempt to parse the first 100 bytes as a record, or skip if unsupported.
+            # TODO: Add exact record chunking based on UmaConn spec for the RACE dataspec
+            parsed = _parse_odds_record(str(buff)[:200], race_date_str)
             if parsed is None:
                 continue
 

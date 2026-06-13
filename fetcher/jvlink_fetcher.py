@@ -89,7 +89,7 @@ def _jvlink_fetch(race_date: str):
     rc = jvlink.JVRTOpen(_DATASPEC_ODDS, "")
     if rc < 0:
         if rc == -114:
-            log.warning("JV-Link: No live JRA data available today (normal for weekdays).")
+            log.warning("JV-Link: No live JRA data available today (normal for weekdays or outside racing hours).")
             return [], {}
         raise RuntimeError(f"JVRTOpen failed — code {rc}")
 
