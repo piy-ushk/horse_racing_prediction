@@ -13,20 +13,16 @@ Requirements:
 
 COM ProgID : NVDTLabLib.NVLink
 Init param : "UNKNOWN"  (literal string — the key is stored by the GUI)
-
-Reference  : https://qiita.com/masachaco/items/7aa4afa4ca70d4eb93d9
-             https://gist.github.com/miyamamoto/cbe26d18173fce119a3f6ef56e31d9d5
 """
 from pathlib import Path
 import sys
+import time
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 from logger.operation_logger import get_logger
 
 log = get_logger()
 
-# For UmaConn, dataspecs use strings like "RACE" instead of JV-Link's "0B11"
-# TODO: Verify if UmaConn requires a different string specifically for Odds, or if "RACE" includes it.
 _DATASPEC_ODDS = "RACE"
 _NV_BUFFER_SIZE = 110000
 
@@ -44,17 +40,6 @@ def enrich_odds(races: list, horses_by_race: dict, target_date: str) -> dict:
 
 
 def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
-    """
-    Real UmaConn integration via Windows COM (NVDTLabLib.NVLink).
-
-    Data flow (mirrors JV-Link exactly, with NV prefix):
-      NVInit("UNKNOWN")        — initialise (license resolved from GUI setup)
-      NVOpen(dataspec, ...)    — open a data stream for today's odds
-      loop NVRead(...)         — read fixed-width NVDATA records
-      NVClose()                — release the connection
-
-    NOTE: This DLL is 32-bit only. You must run Python (x86) 32-bit.
-    """
     try:
         import win32com.client  # type: ignore
     except ImportError:
@@ -64,7 +49,7 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
         )
 
     race_date_str = target_date.replace("-", "")
-    fromtime = f"{race_date_str}000000"  # YYYYMMDDHHMMSS
+    fromtime = f"{race_date_str}000000"
 
     log.info("UmaConn: connecting to COM server (NVDTLabLib.NVLink)...")
     nvlink = win32com.client.Dispatch("NVDTLabLib.NVLink")
@@ -73,8 +58,7 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
     if rc != 0:
         raise RuntimeError(
             f"NVInit failed — code {rc}. "
-            "Open the UmaConn GUI once to complete the initial setup and "
-            "register the license key (UMACONN_API_KEY)."
+            "Open the UmaConn GUI once to complete the initial setup."
         )
 
     log.info("UmaConn: opening odds stream (dataspec=%s from=%s)...", _DATASPEC_ODDS, fromtime)
@@ -82,10 +66,9 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
         _DATASPEC_ODDS, fromtime, 1, 0, 0, ""
     )
     if rc in (-301, -1) or dl_count > 0:
-        log.info("UmaConn: Data download/connection in progress (rc=%d, dl_count=%d). Waiting for completion...", rc, dl_count)
-        import time
+        log.info("UmaConn: Data download/connection in progress. Waiting for completion...")
         start_time = time.time()
-        timeout = 180  # 3 minutes timeout
+        timeout = 180
         completed = False
         while time.time() - start_time < timeout:
             status = nvlink.NVStatus()
@@ -94,14 +77,18 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
                 log.info("UmaConn: Download completed successfully.")
                 break
             elif status > 0:
-                log.info("UmaConn: Downloading... %d%%", status)
+                pass # Downloading
             else:
-                log.error("UmaConn: Download failed with status %d", status)
+                if status == -203:
+                    log.warning("UmaConn: No local data found for today (status -203). Normal if no local races are scheduled.")
+                    completed = False
+                else:
+                    log.error("UmaConn: Download failed with status %d", status)
                 break
             time.sleep(2)
         
         if not completed:
-            log.warning("UmaConn: No live local data available today or outside racing hours (timed out or failed).")
+            log.warning("UmaConn: No live local data available today or outside racing hours.")
             return horses_by_race
     elif rc < 0:
         raise RuntimeError(f"NVOpen failed — code {rc}")
@@ -111,60 +98,38 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
 
     try:
         while True:
-            # NVGets throws COM exceptions, so we use NVRead which returns the whole file payload
             rc, buff, size, filename = nvlink.NVRead("", _NV_BUFFER_SIZE, "")
-            if rc == 0:
-                break
-            if rc == -1:
-                continue
+            if rc == 0: break
+            if rc == -1: continue
             if rc == -3:
-                import time
                 time.sleep(1)
                 continue
             if rc < 0:
                 log.error("UmaConn: NVRead error — code %d", rc)
                 break
 
-            # The payload might contain multiple records concatenated.
-            # For now, we attempt to parse the first 100 bytes as a record, or skip if unsupported.
-            # TODO: Add exact record chunking based on UmaConn spec for the RACE dataspec
-            parsed = _parse_odds_record(str(buff)[:200], race_date_str)
-            if parsed is None:
+            parsed_race, parsed_horses = _parse_h1_record(str(buff), target_date)
+            if not parsed_race or not parsed_horses:
                 continue
 
-            race_id = parsed["race_id"]
+            race_id = parsed_race["race_id"]
             if race_id not in new_horses:
-                new_races.append({
-                    "race_id": race_id,
-                    "race_name": parsed["race_name"],
-                    "race_date": parsed["race_date"],
-                    "venue": parsed["venue"],
-                    "race_number": parsed["race_number"],
-                })
+                new_races.append(parsed_race)
                 new_horses[race_id] = []
 
-            new_horses[race_id].append({
-                "horse_id": parsed["horse_id"],
-                "race_id": race_id,
-                "horse_name": parsed["horse_name"],
-                "horse_number": parsed["horse_number"],
-                "odds": parsed["odds"],
-            })
+            new_horses[race_id].extend(parsed_horses)
+            
     finally:
         nvlink.NVClose()
 
-    # Merge local races into the existing dict (which may contain JRA races)
+    # Merge local races into the existing dict
     for race in new_races:
         rid = race["race_id"]
         if rid not in horses_by_race:
             races.append(race)
             horses_by_race[rid] = new_horses[rid]
-            log.info(
-                "UmaConn: added local race %s — %d horses",
-                race["race_name"], len(new_horses[rid]),
-            )
+            log.info("UmaConn: added local race %s — %d horses", race["race_name"], len(new_horses[rid]))
         else:
-            # Update odds for horses already present from JV-Link
             existing = {h["horse_id"]: h for h in horses_by_race[rid]}
             for h in new_horses[rid]:
                 if h["horse_id"] in existing:
@@ -176,61 +141,81 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
     return horses_by_race
 
 
-def _parse_odds_record(buff: str, race_date: str) -> dict | None:
+def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
     """
-    Parse one NVDATA odds record.
-
-    The NVDATA format mirrors the JRA-VAN JVDATA layout.
-    Field offsets follow the UmaConn data specification PDF.
-    Adjust slice indices if the official spec differs from JV-Link.
+    Parse an NVDATA H1 record (UmaConn RACE).
+    H1 records contain total pari-mutuel votes per horse, which we convert to odds.
     """
-    if not buff or len(buff) < 30:
-        return None
+    if not buff or len(buff) < 90:
+        return None, []
+        
     try:
-        record_type = buff[0:2].strip()
-        if record_type not in ("0B", "OB"):
-            return None
+        if buff[0:2] != "H1":
+            return None, []
 
-        venue_code   = buff[12:14].strip()
-        race_num_str = buff[14:16].strip()
-        horse_num_str = buff[16:18].strip()
-
-        if not race_num_str.isdigit() or not horse_num_str.isdigit():
-            return None
-
-        race_number  = int(race_num_str)
-        horse_number = int(horse_num_str)
-
-        horse_name_raw = buff[18:54]
-        try:
-            horse_name = horse_name_raw.encode("latin-1").decode("cp932").strip()
-        except Exception:
-            horse_name = horse_name_raw.strip()
-
-        odds_raw = buff[54:58].strip()
-        odds = int(odds_raw) / 10.0 if odds_raw.isdigit() else 0.0
-        if odds <= 0:
-            return None
-
+        venue_code = buff[19:21].strip()
+        race_num_str = buff[25:27].strip()
+        
+        if not race_num_str.isdigit():
+            return None, []
+            
+        race_number = int(race_num_str)
         venue_name = _LOCAL_VENUE_CODE_MAP.get(venue_code, venue_code)
-        fmt_date   = f"{race_date[:4]}-{race_date[4:6]}-{race_date[6:8]}"
-        race_id    = f"{race_date}_{venue_code}_{race_number:02d}"
-        horse_id   = f"{race_id}_H{horse_number:02d}"
-
-        return {
-            "race_id":     race_id,
-            "race_name":   f"{venue_name}{race_number}R",
-            "race_date":   fmt_date,
-            "venue":       venue_name,
+        race_id = f"{target_date.replace('-', '')[:8][:4]}-{target_date.replace('-', '')[:8][4:6]}-{target_date.replace('-', '')[:8][6:8]}_{venue_code}_{race_number:02d}"
+        
+        race_info = {
+            "race_id": race_id,
+            "race_name": f"{venue_name}{race_number}R",
+            "race_date": target_date,
+            "venue": venue_name,
             "race_number": race_number,
-            "horse_id":    horse_id,
-            "horse_name":  horse_name,
-            "horse_number": horse_number,
-            "odds":        odds,
         }
+
+        # Parse horses (15-byte blocks starting at byte 90)
+        horses = []
+        offset = 90
+        raw_votes = {}
+        
+        for _ in range(18): # Max horses
+            chunk = buff[offset : offset + 15]
+            if len(chunk) < 15 or not chunk[0:2].isdigit():
+                break
+                
+            h_num = int(chunk[0:2])
+            votes_str = chunk[2:13].strip()
+            
+            # Scratched horses are marked with dashes
+            if "-" in votes_str:
+                votes = 0
+            else:
+                votes = int(votes_str) if votes_str.isdigit() else 0
+                
+            raw_votes[h_num] = votes
+            offset += 15
+            
+        # Calculate Odds = (Total Pool * 0.8) / Votes
+        total_pool = sum(raw_votes.values())
+        
+        for h_num, votes in raw_votes.items():
+            if votes > 0:
+                odds = round((total_pool * 0.8) / votes, 1)
+            else:
+                odds = 0.0
+                
+            horse_id = f"{race_id}_H{h_num:02d}"
+            horses.append({
+                "horse_id": horse_id,
+                "race_id": race_id,
+                "horse_name": f"Local Horse {h_num:02d}", # H1 doesn't provide names
+                "horse_number": h_num,
+                "odds": odds,
+            })
+            
+        return race_info, horses
+        
     except Exception as exc:
-        log.debug("UmaConn: failed to parse record — %s", exc)
-        return None
+        log.debug("UmaConn: failed to parse H1 record — %s", exc)
+        return None, []
 
 
 # UmaConn local venue codes (地方競馬場コード)
