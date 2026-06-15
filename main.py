@@ -23,7 +23,7 @@ from database import db
 from fetcher.jvlink_fetcher import fetch_races_and_odds
 from fetcher.umaconn_fetcher import enrich_odds
 from predictor.engine import generate_predictions
-from publisher.wordpress import publish_race
+# from publisher.wordpress import publish_race
 
 log = get_logger()
 
@@ -69,20 +69,21 @@ def run(race_date: str | None = None):
 
     log.info("Prediction generation completed — %d races saved", len(races))
 
-    # Phase 5: Publish to WordPress
+    # Phase 5: Publish to WordPress (Single Master Page)
     horses_flat = {
         h["horse_id"]: h
         for horses in horses_by_race.values()
         for h in horses
     }
+    
+    from publisher.wordpress import publish_daily_master_page
+    result = publish_daily_master_page(all_predictions, horses_flat, race_date)
+    
     published_urls = []
-    for race, preds, _ in all_predictions:
-        result = publish_race(race, preds, horses_flat)
-        if result.get("wp_page_id"):
-            db.update_wp_info(race["race_id"], result["wp_page_id"], result["wp_page_url"])
+    if result.get("wp_page_url"):
         published_urls.append(result["wp_page_url"])
-
-    log.info("WordPress updated successfully — %d pages", len(published_urls))
+        
+    log.info("WordPress: Master page published successfully")
     for url in published_urls:
         log.info("  → %s", url)
 

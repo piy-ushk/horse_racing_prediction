@@ -1,11 +1,11 @@
 """
 WordPress REST API publisher.
 
-Sends prediction data to WordPress and creates / updates race prediction pages.
+Sends prediction data to WordPress and creates / updates a single master page per day.
 Each page:
   - Has a noindex meta (via Yoast SEO REST field or injected HTML)
   - Is accessible only when ?auth=line_only is in the URL
-  - Uses the page slug  race-{race_id}
+  - Uses the page slug  predictions-{race_date}
 
 In demo mode (no WP credentials) the publisher writes static HTML files to
 data/html/ so results can be previewed locally via the Flask server.
@@ -21,17 +21,21 @@ from logger.operation_logger import get_logger
 log = get_logger()
 
 
-def publish_race(race: dict, predictions: list, horses_by_id: dict) -> dict:
+def publish_daily_master_page(all_predictions: list, horses_by_id: dict, race_date: str) -> dict:
     """
     Returns {"wp_page_id": int|None, "wp_page_url": str}.
+    all_predictions is a list of tuples: (race, preds_for_race, horses_for_race)
     """
-    html_content = _build_page_html(race, predictions, horses_by_id)
+    if not all_predictions:
+        return {}
+
+    html_content = _build_daily_master_html(all_predictions, horses_by_id, race_date)
 
     if _wp_configured():
-        return _post_to_wordpress(race, html_content)
+        return _post_to_wordpress(race_date, html_content)
 
     log.info("WordPress: no credentials — writing static HTML for demo")
-    return _write_static_html(race, html_content)
+    return _write_static_html(race_date, html_content)
 
 
 def _wp_configured() -> bool:
@@ -39,46 +43,63 @@ def _wp_configured() -> bool:
                 and "your-wordpress-site" not in config.WP_BASE_URL)
 
 
-def _build_page_html(race: dict, predictions: list, horses_by_id: dict) -> str:
+def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_date: str) -> str:
     h, m = config.get_schedule()
     scheduled_time = f"{h:02d}:{m:02d}"
-    rows = ""
-    for p in predictions:
-        horse = horses_by_id.get(p["horse_id"], {})
-        mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>' if p["mark"] else ""
-        rows += (
-            f'<tr>'
-            f'<td>{p["rank"]}</td>'
-            f'<td>{horse.get("horse_number","")}</td>'
-            f'<td>{horse.get("horse_name","")}</td>'
-            f'<td>{p["odds"]:.1f}</td>'
-            f'<td>{mark_cell}</td>'
-            f'</tr>\n'
-        )
+    
+    sections = []
+    
+    # Sort predictions by venue then race number to group them nicely
+    sorted_preds = sorted(all_predictions, key=lambda x: (x[0].get("venue", ""), x[0].get("race_number", 0)))
+    
+    for race, predictions, _ in sorted_preds:
+        rows = ""
+        for p in predictions:
+            horse = horses_by_id.get(p["horse_id"], {})
+            mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>' if p["mark"] else ""
+            rows += (
+                f'<tr>'
+                f'<td>{p["rank"]}</td>'
+                f'<td>{horse.get("horse_number","")}</td>'
+                f'<td>{horse.get("horse_name","")}</td>'
+                f'<td>{p["odds"]:.1f}</td>'
+                f'<td>{mark_cell}</td>'
+                f'</tr>\n'
+            )
+            
+        section_html = f"""
+  <div class="race-section">
+    <h3>{race["race_name"]}  予想</h3>
+    <p class="race-meta">{race["venue"]} {race["race_number"]}R</p>
+    <table class="prediction-table">
+      <thead>
+        <tr><th>順位</th><th>馬番</th><th>馬名</th><th>オッズ</th><th>印</th></tr>
+      </thead>
+      <tbody>
+{rows}      </tbody>
+    </table>
+  </div>
+"""
+        sections.append(section_html)
+
+    all_sections_html = "\n".join(sections)
 
     return f"""<!-- noindex -->
 <meta name="robots" content="noindex,nofollow">
 <div id="race-prediction" data-auth-required="line_only">
-  <h2>{race["race_name"]}  予想</h2>
-  <p class="race-meta">{race["race_date"]} | {race["venue"]} {race["race_number"]}R</p>
-  <table class="prediction-table">
-    <thead>
-      <tr><th>順位</th><th>馬番</th><th>馬名</th><th>オッズ</th><th>印</th></tr>
-    </thead>
-    <tbody>
-{rows}    </tbody>
-  </table>
+  <h2>{race_date} 本日の予想まとめ</h2>
   <p class="note">※ 予想は当日{scheduled_time}時点のオッズに基づいています</p>
+{all_sections_html}
 </div>
 """
 
 
-def _post_to_wordpress(race: dict, html_content: str) -> dict:
+def _post_to_wordpress(race_date: str, html_content: str) -> dict:
     import requests
     from requests.auth import HTTPBasicAuth
 
-    slug = f"race-{race['race_id'].lower()}"
-    title = f"{race['race_name']} 予想 {race['race_date']}"
+    slug = f"predictions-{race_date}"
+    title = f"{race_date} 本日の全レース予想"
     endpoint = f"{config.WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/pages"
     auth = HTTPBasicAuth(config.WP_USERNAME, config.WP_APP_PASSWORD)
 
@@ -97,22 +118,22 @@ def _post_to_wordpress(race: dict, html_content: str) -> dict:
 
     if page_id:
         resp = requests.post(f"{endpoint}/{page_id}", json=payload, auth=auth, timeout=15)
-        log.info("WordPress: updated page id=%d  slug=%s", page_id, slug)
+        log.info("WordPress: updated master page id=%d  slug=%s", page_id, slug)
     else:
         resp = requests.post(endpoint, json=payload, auth=auth, timeout=15)
-        log.info("WordPress: created new page  slug=%s", slug)
+        log.info("WordPress: created new master page  slug=%s", slug)
 
     resp.raise_for_status()
     page_data = resp.json()
     page_url = f"{config.WP_BASE_URL.rstrip('/')}/{slug}?{config.AUTH_PARAM}={config.AUTH_VALUE}"
-    log.info("WordPress: page URL → %s", page_url)
+    log.info("WordPress: master page URL → %s", page_url)
     return {"wp_page_id": page_data["id"], "wp_page_url": page_url}
 
 
-def _write_static_html(race: dict, html_content: str) -> dict:
+def _write_static_html(race_date: str, html_content: str) -> dict:
     out_dir = config.DATA_DIR / "html"
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = f"race-{race['race_id'].lower()}"
+    slug = f"predictions-{race_date}"
     out_path = out_dir / f"{slug}.html"
 
     full_page = f"""<!DOCTYPE html>
@@ -120,17 +141,21 @@ def _write_static_html(race: dict, html_content: str) -> dict:
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<title>{race["race_name"]} 予想</title>
+<title>{race_date} 本日の全レース予想</title>
 <style>
   body{{font-family:sans-serif;max-width:700px;margin:40px auto;padding:0 16px;background:#fafafa}}
-  h2{{color:#1a1a2e}} .race-meta{{color:#666;font-size:.9em}}
+  h2{{color:#1a1a2e;text-align:center;border-bottom:2px solid #1a1a2e;padding-bottom:10px}} 
+  h3{{color:#333;margin-bottom:5px;margin-top:0}}
+  .race-section{{background:#fff;border-radius:8px;padding:20px;margin-bottom:30px;box-shadow:0 2px 5px rgba(0,0,0,0.05)}}
+  .race-meta{{color:#666;font-size:.9em;margin-top:0}}
   .prediction-table{{border-collapse:collapse;width:100%}}
-  .prediction-table th,.prediction-table td{{border:1px solid #ccc;padding:8px 12px;text-align:center}}
+  .prediction-table th,.prediction-table td{{border:1px solid #eee;padding:8px 12px;text-align:center}}
   .prediction-table thead{{background:#1a1a2e;color:#fff}}
+  .prediction-table tr:nth-child(even){{background-color:#f9f9f9}}
   .mark{{font-size:1.4em;font-weight:bold}}
   .mark-1{{color:#d4af37}} .mark-2{{color:#c0c0c0}}
   .mark-3{{color:#cd7f32}} .mark-4{{color:#888}}
-  .note{{font-size:.8em;color:#999;margin-top:16px}}
+  .note{{font-size:.8em;color:#999;margin-bottom:20px;text-align:center}}
   .access-denied{{display:none}}
 </style>
 <script>

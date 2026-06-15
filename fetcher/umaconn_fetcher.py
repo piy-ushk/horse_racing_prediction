@@ -141,6 +141,8 @@ def _nvlink_fetch(races: list, horses_by_race: dict, target_date: str) -> dict:
     return horses_by_race
 
 
+_netkeiba_cache = {}
+
 def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
     """
     Parse an NVDATA H1 record (UmaConn RACE).
@@ -159,6 +161,10 @@ def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
         if not race_num_str.isdigit():
             return None, []
             
+        if venue_code not in _LOCAL_VENUE_CODE_MAP:
+            log.debug("UmaConn: skipping unknown venue code %s", venue_code)
+            return None, []
+            
         race_number = int(race_num_str)
         venue_name = _LOCAL_VENUE_CODE_MAP.get(venue_code, venue_code)
         race_id = f"{target_date.replace('-', '')[:8][:4]}-{target_date.replace('-', '')[:8][4:6]}-{target_date.replace('-', '')[:8][6:8]}_{venue_code}_{race_number:02d}"
@@ -171,44 +177,130 @@ def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
             "race_number": race_number,
         }
 
+        # Attempt to fetch real Japanese horse names from NetKeiba with caching
+        horse_names_map = {}
+        if race_id in _netkeiba_cache:
+            horse_names_map = _netkeiba_cache[race_id]
+        else:
+            try:
+                import requests
+                from html.parser import HTMLParser
+
+                class NetkeibaParser(HTMLParser):
+                    def __init__(self):
+                        super().__init__()
+                        self.in_umaban = False
+                        self.in_horse_name = False
+                        self.in_a = False
+                        self.current_umaban = None
+                        self.current_horse_name = None
+                        self.map = {}
+                        
+                    def handle_starttag(self, tag, attrs):
+                        attrs_dict = dict(attrs)
+                        if tag == "td":
+                            cls = attrs_dict.get("class", "")
+                            if cls.startswith("Umaban"):
+                                self.in_umaban = True
+                        elif tag == "span":
+                            cls = attrs_dict.get("class", "")
+                            if "HorseName" in cls:
+                                self.in_horse_name = True
+                        elif tag == "a" and self.in_horse_name:
+                            self.in_a = True
+                            
+                    def handle_data(self, data):
+                        data = data.strip()
+                        if not data: return
+                        if self.in_umaban:
+                            try: self.current_umaban = int(data)
+                            except ValueError: pass
+                        elif self.in_a:
+                            self.current_horse_name = data
+                            
+                    def handle_endtag(self, tag):
+                        if tag == "td" and self.in_umaban:
+                            self.in_umaban = False
+                        elif tag == "a" and self.in_a:
+                            self.in_a = False
+                        elif tag == "span" and self.in_horse_name:
+                            self.in_horse_name = False
+                            if self.current_umaban is not None and self.current_horse_name is not None:
+                                self.map[self.current_umaban] = self.current_horse_name
+                                self.current_umaban = None
+                                self.current_horse_name = None
+
+                _NETKEIBA_VENUE_MAP = {
+                    "帯広": "03", "門別": "30", "盛岡": "35", "水沢": "36",
+                    "浦和": "42", "船橋": "43", "大井": "44", "川崎": "45",
+                    "金沢": "46", "笠松": "47", "名古屋": "48", "園田": "50",
+                    "姫路": "51", "高知": "54", "佐賀": "55"
+                }
+                
+                # NetKeiba NAR Race ID format: YYYY + venue_code + MMDD + race_number(2 digits)
+                nk_date = target_date.replace('-', '')
+                # We must use NetKeiba's venue code, NOT JV-Data's venue code
+                nk_venue_code = _NETKEIBA_VENUE_MAP.get(venue_name, venue_code)
+                nk_race_id = f"{nk_date[:4]}{nk_venue_code}{nk_date[4:8]}{race_number:02d}"
+                nk_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={nk_race_id}"
+                
+                resp = requests.get(nk_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=5)
+                if resp.ok:
+                    parser = NetkeibaParser()
+                    parser.feed(resp.text)
+                    horse_names_map = parser.map
+                    _netkeiba_cache[race_id] = horse_names_map
+            except Exception as e:
+                log.warning("NetKeiba scrape failed for %s: %s", race_id, e)
+
         # Parse horses (15-byte blocks starting at byte 90)
-        horses = []
+        parsed_horses_info = {}
         offset = 90
         raw_votes = {}
         
-        for _ in range(18): # Max horses
+        reg_horses_str = buff[27:29].strip()
+        num_horses_to_parse = int(reg_horses_str) if reg_horses_str.isdigit() else 18
+        
+        for _ in range(num_horses_to_parse):
             chunk = buff[offset : offset + 15]
             if len(chunk) < 15 or not chunk[0:2].isdigit():
                 break
                 
             h_num = int(chunk[0:2])
+            if h_num == 0:
+                offset += 15
+                continue
+                
             votes_str = chunk[2:13].strip()
-            
-            # Scratched horses are marked with dashes
             if "-" in votes_str:
                 votes = 0
             else:
                 votes = int(votes_str) if votes_str.isdigit() else 0
                 
             raw_votes[h_num] = votes
+            parsed_horses_info[h_num] = horse_names_map.get(h_num, f"Local Horse {h_num:02d}")
             offset += 15
             
         # Calculate Odds = (Total Pool * 0.8) / Votes
         total_pool = sum(raw_votes.values())
         
-        for h_num, votes in raw_votes.items():
+        horses = []
+        for h_num, horse_name in parsed_horses_info.items():
+            votes = raw_votes.get(h_num, 0)
             if votes > 0:
                 odds = round((total_pool * 0.8) / votes, 1)
             else:
                 odds = 0.0
                 
-            horse_id = f"{race_id}_H{h_num:02d}"
+            horse_id = f"{race_id}_{h_num:02d}"
             horses.append({
-                "horse_id": horse_id,
                 "race_id": race_id,
-                "horse_name": f"Local Horse {h_num:02d}", # H1 doesn't provide names
+                "horse_id": horse_id,
                 "horse_number": h_num,
-                "odds": odds,
+                "horse_name": horse_name,
+                "weight": 0.0,
+                "weight_diff": 0.0,
+                "odds": odds
             })
             
         return race_info, horses
