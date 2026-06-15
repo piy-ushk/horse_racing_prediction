@@ -50,8 +50,17 @@ def run(race_date: str | None = None):
     horses_by_race = enrich_odds(races, horses_by_race, race_date)
 
     if not races:
-        log.warning("No JRA or local races fetched for %s — pipeline aborted", race_date)
-        return
+        log.warning("UmaConn and JV-Link returned no races. Attempting NetKeiba Fallback Scraper...")
+        from fetcher.netkeiba_fallback import scrape_races_and_odds
+        fallback_races, fallback_horses = scrape_races_and_odds(race_date)
+        
+        if fallback_races:
+            races.extend(fallback_races)
+            horses_by_race.update(fallback_horses)
+            log.info("Fallback successful: Recovered %d races directly from NetKeiba.", len(fallback_races))
+        else:
+            log.warning("No JRA, local, or NetKeiba fallback races fetched for %s — pipeline aborted", race_date)
+            return
     log.info("Odds fetched successfully — %d races total", len(races))
 
     # Phase 3 + 4: Generate predictions and save

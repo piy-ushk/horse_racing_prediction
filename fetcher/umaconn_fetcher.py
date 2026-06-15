@@ -230,17 +230,11 @@ def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
                                 self.current_umaban = None
                                 self.current_horse_name = None
 
-                _NETKEIBA_VENUE_MAP = {
-                    "帯広": "03", "門別": "30", "盛岡": "35", "水沢": "36",
-                    "浦和": "42", "船橋": "43", "大井": "44", "川崎": "45",
-                    "金沢": "46", "笠松": "47", "名古屋": "48", "園田": "50",
-                    "姫路": "51", "高知": "54", "佐賀": "55"
-                }
-                
                 # NetKeiba NAR Race ID format: YYYY + venue_code + MMDD + race_number(2 digits)
                 nk_date = target_date.replace('-', '')
-                # We must use NetKeiba's venue code, NOT JV-Data's venue code
-                nk_venue_code = _NETKEIBA_VENUE_MAP.get(venue_name, venue_code)
+                
+                # Exception: JV-Data uses "33" for Obihiro, but NetKeiba uses "03"
+                nk_venue_code = "03" if venue_code == "33" else venue_code
                 nk_race_id = f"{nk_date[:4]}{nk_venue_code}{nk_date[4:8]}{race_number:02d}"
                 nk_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={nk_race_id}"
                 
@@ -310,11 +304,21 @@ def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
         return None, []
 
 
-# UmaConn local venue codes (地方競馬場コード)
+# UmaConn local venue codes (地方競馬場コード) - Official JV-Data Spec
 _LOCAL_VENUE_CODE_MAP = {
-    "30": "門別",   "31": "岩手盛岡", "32": "水沢",
-    "35": "浦和",   "36": "船橋",     "37": "大井",   "38": "川崎",
-    "42": "金沢",   "43": "笠松",     "44": "名古屋",
-    "46": "園田",   "47": "姫路",
-    "48": "高知",   "50": "佐賀",
+    "33": "帯広",
+    "30": "門別",
+    "35": "盛岡",
+    "36": "水沢",
+    "42": "浦和",
+    "43": "船橋",
+    "44": "大井",
+    "45": "川崎",
+    "46": "金沢",
+    "47": "笠松",
+    "48": "名古屋",
+    "50": "園田",
+    "51": "姫路",
+    "54": "高知",
+    "55": "佐賀"
 }
