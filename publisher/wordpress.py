@@ -59,10 +59,8 @@ def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_dat
             mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>' if p["mark"] else ""
             rows += (
                 f'<tr>'
-                f'<td>{p["rank"]}</td>'
                 f'<td>{horse.get("horse_number","")}</td>'
                 f'<td>{horse.get("horse_name","")}</td>'
-                f'<td>{p["odds"]:.1f}</td>'
                 f'<td>{mark_cell}</td>'
                 f'</tr>\n'
             )
@@ -73,7 +71,7 @@ def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_dat
     <p class="race-meta">{race["venue"]} {race["race_number"]}R</p>
     <table class="prediction-table">
       <thead>
-        <tr><th>順位</th><th>馬番</th><th>馬名</th><th>オッズ</th><th>印</th></tr>
+        <tr><th>馬番</th><th>馬名</th><th>印</th></tr>
       </thead>
       <tbody>
 {rows}      </tbody>
@@ -88,7 +86,6 @@ def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_dat
 <meta name="robots" content="noindex,nofollow">
 <div id="race-prediction" data-auth-required="line_only">
   <h2>{race_date} 本日の予想まとめ</h2>
-  <p class="note">※ 予想は当日{scheduled_time}時点のオッズに基づいています</p>
 {all_sections_html}
 </div>
 """
