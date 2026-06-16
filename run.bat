@@ -18,15 +18,19 @@ echo   [6] Open Today's Log File in Notepad
 echo   [7] Exit
 echo.
 echo ==========================================================
-choice /C 1234567 /N /M "Please select an option [1-7]: "
+set /p user_choice="Please select an option [1-7]: "
 
-if errorlevel 7 goto end
-if errorlevel 6 goto open_logs
-if errorlevel 5 goto setup_task
-if errorlevel 4 goto check_task
-if errorlevel 3 goto run_pipeline
-if errorlevel 2 goto test_conn
-if errorlevel 1 goto start_web
+if "%user_choice%"=="1" goto start_web
+if "%user_choice%"=="2" goto test_conn
+if "%user_choice%"=="3" goto run_pipeline
+if "%user_choice%"=="4" goto check_task
+if "%user_choice%"=="5" goto setup_task
+if "%user_choice%"=="6" goto open_logs
+if "%user_choice%"=="7" goto end
+
+echo Invalid option. Please try again.
+pause
+goto menu
 
 :start_web
 cls
