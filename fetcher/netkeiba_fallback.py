@@ -173,3 +173,119 @@ def scrape_races_and_odds(race_date: str) -> tuple[list, dict]:
             
     log.info("Netkeiba Fallback: Completed direct scrape. Found %d local races total.", len(races_list))
     return races_list, horses_by_race
+
+
+_JRA_VENUE_CODE_MAP = {
+    "01": "札幌", "02": "函館", "03": "福島", "04": "新潟",
+    "05": "東京", "06": "中山", "07": "中京", "08": "京都",
+    "09": "阪神", "10": "小倉",
+}
+
+def scrape_jra_races_and_odds(race_date: str) -> tuple[list, dict]:
+    """
+    Fallback scraper: Bypasses JV-Link and scrapes ALL JRA races for the target date directly from NetKeiba.
+    Returns: (races_list, horses_by_race_id)
+    """
+    import re
+    log.info("Netkeiba JRA Fallback: Initiating direct scrape for %s...", race_date)
+    
+    date_str = race_date.replace('-', '')
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"}
+    
+    # 1. Fetch JRA race list subpage for the date
+    url = f"https://race.netkeiba.com/top/race_list_sub.html?kaisai_date={date_str}"
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if not resp.ok:
+            log.warning("Netkeiba JRA Fallback: Failed to fetch JRA race list subpage. Code: %d", resp.status_code)
+            return [], {}
+    except Exception as e:
+        log.warning("Netkeiba JRA Fallback: Error fetching JRA race list: %s", e)
+        return [], {}
+        
+    # Extract unique 12-digit race IDs
+    race_ids = set()
+    for match in re.finditer(r"race_id=(\d{12})", resp.text):
+        race_ids.add(match.group(1))
+        
+    sorted_race_ids = sorted(list(race_ids))
+    if not sorted_race_ids:
+        log.info("Netkeiba JRA Fallback: No JRA races scheduled on %s.", race_date)
+        return [], {}
+        
+    log.info("Netkeiba JRA Fallback: Found %d JRA races scheduled.", len(sorted_race_ids))
+    
+    races_list = []
+    horses_by_race = {}
+    
+    for rid in sorted_race_ids:
+        race_url = f"https://race.netkeiba.com/race/shutuba.html?race_id={rid}"
+        
+        v_code = rid[4:6]
+        venue_name = _JRA_VENUE_CODE_MAP.get(v_code, v_code)
+        race_num = int(rid[10:12])
+        
+        try:
+            r_resp = requests.get(race_url, headers=headers, timeout=5)
+            if not r_resp.ok:
+                log.warning("Netkeiba JRA Fallback: Failed to fetch race details for %s", rid)
+                continue
+                
+            parser = NetkeibaOddsParser()
+            parser.feed(r_resp.text)
+            
+            if not parser.horses:
+                log.debug("Netkeiba JRA Fallback: No horses parsed (possibly entries not drawn yet) for %s", rid)
+                continue
+                
+            race_id = f"{rid[:4]}-{rid[4:6]}-{rid[6:8]}_{v_code}_{race_num:02d}"
+            
+            # Extract race name using regex
+            race_name = ""
+            name_match = re.search(r'<h1 class="RaceName">\s*(.*?)\s*(?:<|$)', r_resp.text)
+            if name_match:
+                race_name = name_match.group(1).strip()
+            else:
+                nav_match = re.search(fr'<a href="[^"]*race_id={rid}[^"]*" title="([^"]+)"', r_resp.text)
+                if nav_match:
+                    race_name = nav_match.group(1).strip()
+            
+            if not race_name:
+                race_name = f"{venue_name}{race_num}R"
+            else:
+                race_name = f"{venue_name}{race_num}R {race_name}"
+                
+            race_info = {
+                "race_id": race_id,
+                "race_name": race_name,
+                "race_date": race_date,
+                "venue": venue_name,
+                "race_number": race_num,
+            }
+            
+            horses = []
+            for h_num, h_data in parser.horses.items():
+                # For JRA, horse ID uses the _H prefix: race_id_H{horse_number:02d}
+                horse_id = f"{race_id}_H{h_num:02d}"
+                horses.append({
+                    "race_id": race_id,
+                    "horse_id": horse_id,
+                    "horse_number": h_num,
+                    "horse_name": h_data["horse_name"],
+                    "weight": 0.0,
+                    "weight_diff": 0.0,
+                    "odds": h_data["odds"]
+                })
+                
+            races_list.append(race_info)
+            horses_by_race[race_id] = horses
+            log.info("Netkeiba JRA Fallback: Scraped %s - %d horses", race_name, len(horses))
+            
+        except Exception as e:
+            log.warning("Netkeiba JRA Fallback: Error scraping race %s: %s", rid, e)
+            
+        time.sleep(0.5)
+        
+    log.info("Netkeiba JRA Fallback: Completed JRA direct scrape. Found %d races.", len(races_list))
+    return races_list, horses_by_race
+

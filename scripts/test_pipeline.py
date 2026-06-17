@@ -19,7 +19,7 @@ from database import db
 from fetcher.jvlink_fetcher import fetch_races_and_odds
 from fetcher.umaconn_fetcher import enrich_odds
 from predictor.engine import generate_predictions
-from publisher.wordpress import publish_race
+from publisher.wordpress import publish_daily_master_page
 
 TEST_DATE = "2099-01-01"  # far-future date won't clash with real data
 
@@ -62,9 +62,8 @@ def run_smoke_test():
 
     # Publish (static HTML in demo)
     print("[5] Publish (static HTML demo)...")
-    for race, preds, _ in all_predictions:
-        result = publish_race(race, preds, horses_flat)
-        assert result.get("wp_page_url"), "Publisher returned no URL"
+    result = publish_daily_master_page(all_predictions, horses_flat, TEST_DATE)
+    assert result.get("wp_page_url"), "Publisher returned no URL"
     print("    OK — static HTML files written to data/html/")
 
     print("\n[ALL CHECKS PASSED] Pipeline is working correctly.")
