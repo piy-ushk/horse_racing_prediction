@@ -61,10 +61,10 @@ goto menu
 :run_pipeline
 cls
 echo ==========================================================
-echo  RUNNING PREDICTION PIPELINE MANUALLY
+echo  RUNNING PREDICTION PIPELINE MANUALLY (FORCED OVERWRITE)
 echo ==========================================================
 echo.
-python main.py
+python main.py --force
 echo.
 pause
 goto menu

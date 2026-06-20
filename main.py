@@ -12,6 +12,7 @@ Execution order (mirrors the MVP workflow spec):
 Intended to be run by Windows Task Scheduler at 09:30 AM daily.
 """
 import sys
+import argparse
 from datetime import date
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from predictor.engine import generate_predictions
 log = get_logger()
 
 
-def run(race_date: str | None = None):
+def run(race_date: str | None = None, force: bool = False):
     if race_date is None:
         race_date = date.today().strftime("%Y-%m-%d")
 
@@ -40,8 +41,8 @@ def run(race_date: str | None = None):
     db.init_db()
     log.info("Database initialised")
 
-    # Guard: don't overwrite predictions already generated today
-    if db.predictions_exist_for_date(race_date):
+    # Guard: don't overwrite predictions already generated today unless forced
+    if not force and db.predictions_exist_for_date(race_date):
         log.info("Predictions already exist for %s — skipping (fixed result)", race_date)
         return
 
@@ -139,5 +140,9 @@ def run(race_date: str | None = None):
 
 
 if __name__ == "__main__":
-    target_date = sys.argv[1] if len(sys.argv) > 1 else None
-    run(target_date)
+    parser = argparse.ArgumentParser(description="Horse Racing Prediction Pipeline")
+    parser.add_argument("date", nargs="?", default=None, help="Target date in YYYY-MM-DD format")
+    parser.add_argument("--force", action="store_true", help="Force fetch and overwrite existing predictions")
+    args = parser.parse_args()
+    
+    run(args.date, force=args.force)
