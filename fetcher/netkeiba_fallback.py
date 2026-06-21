@@ -238,7 +238,8 @@ def scrape_jra_races_and_odds(race_date: str) -> tuple[list, dict]:
                 log.debug("Netkeiba JRA Fallback: No horses parsed (possibly entries not drawn yet) for %s", rid)
                 continue
                 
-            race_id = f"{rid[:4]}-{rid[4:6]}-{rid[6:8]}_{v_code}_{race_num:02d}"
+            date_str = race_date.replace("-", "")
+            race_id = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}_{v_code}_{race_num:02d}"
             
             # Extract race name using regex
             race_name = ""
@@ -249,10 +250,9 @@ def scrape_jra_races_and_odds(race_date: str) -> tuple[list, dict]:
                 nav_match = re.search(fr'<a href="[^"]*race_id={rid}[^"]*" title="([^"]+)"', r_resp.text)
                 if nav_match:
                     race_name = nav_match.group(1).strip()
-            
-            if not race_name:
-                race_name = f"{venue_name}{race_num}R"
-            else:
+                else:
+                    race_name = f"{venue_name}{race_num}R"
+            if race_name and not race_name.startswith(f"{venue_name}{race_num}R"):
                 race_name = f"{venue_name}{race_num}R {race_name}"
                 
             race_info = {

@@ -65,26 +65,24 @@ def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_dat
     jra_preds.sort(key=lambda x: (x[0].get("venue", ""), x[0].get("race_number", 0)))
     nar_preds.sort(key=lambda x: (x[0].get("venue", ""), x[0].get("race_number", 0)))
     
-    # Place JRA first, then NAR (or vice versa, user just asked to group them)
-    sorted_preds = jra_preds + nar_preds
-    
-    for race, predictions, _ in sorted_preds:
-        rows = ""
-        for p in predictions:
-            if not p["mark"]:
-                continue
-            
-            horse = horses_by_id.get(p["horse_id"], {})
-            mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>'
-            rows += (
-                f'<tr>'
-                f'<td>{horse.get("horse_number","")}</td>'
-                f'<td>{horse.get("horse_name","")}</td>'
-                f'<td>{mark_cell}</td>'
-                f'</tr>\n'
-            )
-            
-        section_html = f"""
+    # Place JRA first, then NAR
+    if jra_preds:
+        sections.append('<h2>中央競馬 (JRA)</h2>')
+        for race, predictions, _ in jra_preds:
+            rows = ""
+            for p in predictions:
+                if not p["mark"]:
+                    continue
+                horse = horses_by_id.get(p["horse_id"], {})
+                mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>'
+                rows += (
+                    f'<tr>'
+                    f'<td>{horse.get("horse_number","")}</td>'
+                    f'<td>{horse.get("horse_name","")}</td>'
+                    f'<td>{mark_cell}</td>'
+                    f'</tr>\n'
+                )
+            section_html = f"""
   <div class="race-section">
     <h3>{race["race_name"]}  予想</h3>
     <p class="race-meta">{race["venue"]} {race["race_number"]}R</p>
@@ -97,7 +95,38 @@ def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_dat
     </table>
   </div>
 """
-        sections.append(section_html)
+            sections.append(section_html)
+
+    if nar_preds:
+        sections.append('<h2>地方競馬 (NAR)</h2>')
+        for race, predictions, _ in nar_preds:
+            rows = ""
+            for p in predictions:
+                if not p["mark"]:
+                    continue
+                horse = horses_by_id.get(p["horse_id"], {})
+                mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>'
+                rows += (
+                    f'<tr>'
+                    f'<td>{horse.get("horse_number","")}</td>'
+                    f'<td>{horse.get("horse_name","")}</td>'
+                    f'<td>{mark_cell}</td>'
+                    f'</tr>\n'
+                )
+            section_html = f"""
+  <div class="race-section">
+    <h3>{race["race_name"]}  予想</h3>
+    <p class="race-meta">{race["venue"]} {race["race_number"]}R</p>
+    <table class="prediction-table">
+      <thead>
+        <tr><th>馬番</th><th>馬名</th><th>印</th></tr>
+      </thead>
+      <tbody>
+{rows}      </tbody>
+    </table>
+  </div>
+"""
+            sections.append(section_html)
 
     all_sections_html = "\n".join(sections)
 
