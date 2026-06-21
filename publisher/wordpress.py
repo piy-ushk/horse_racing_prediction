@@ -49,14 +49,33 @@ def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_dat
     
     sections = []
     
-    # Sort predictions by venue then race number to group them nicely
-    sorted_preds = sorted(all_predictions, key=lambda x: (x[0].get("venue", ""), x[0].get("race_number", 0)))
+    # Separate JRA and NAR
+    jra_venues = {"札幌", "函館", "福島", "新潟", "東京", "中山", "中京", "京都", "阪神", "小倉"}
+    
+    jra_preds = []
+    nar_preds = []
+    for race_tuple in all_predictions:
+        venue = race_tuple[0].get("venue", "")
+        if venue in jra_venues:
+            jra_preds.append(race_tuple)
+        else:
+            nar_preds.append(race_tuple)
+            
+    # Sort each group by venue then race_number
+    jra_preds.sort(key=lambda x: (x[0].get("venue", ""), x[0].get("race_number", 0)))
+    nar_preds.sort(key=lambda x: (x[0].get("venue", ""), x[0].get("race_number", 0)))
+    
+    # Place JRA first, then NAR (or vice versa, user just asked to group them)
+    sorted_preds = jra_preds + nar_preds
     
     for race, predictions, _ in sorted_preds:
         rows = ""
         for p in predictions:
+            if not p["mark"]:
+                continue
+            
             horse = horses_by_id.get(p["horse_id"], {})
-            mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>' if p["mark"] else ""
+            mark_cell = f'<span class="mark mark-{p["rank"]}">{p["mark"]}</span>'
             rows += (
                 f'<tr>'
                 f'<td>{horse.get("horse_number","")}</td>'
