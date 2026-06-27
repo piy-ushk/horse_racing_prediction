@@ -261,6 +261,7 @@ def scrape_jra_races_and_odds(race_date: str) -> tuple[list, dict]:
                 "race_date": race_date,
                 "venue": venue_name,
                 "race_number": race_num,
+                "jvlink_race_key": f"{date_str}{rid[4:]}"
             }
             
             horses = []

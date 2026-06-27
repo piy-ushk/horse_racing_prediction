@@ -75,95 +75,35 @@ def _jvlink_fetch(race_date: str):
     horses_by_race = {}
     race_keys = set()
     
-    # Pass 1: Fetch 0B11 (Horse Weights) to get horses, venues, and 16-digit race keys
-    log.info("JV-Link: fetching horses from 0B11 (Horse Weights)...")
-    rc = jvlink.JVRTOpen("0B11", date_key)
-    if rc < 0:
-        log.warning("JV-Link: No live JRA data available today or fetch failed (code %d). Skipping JRA.", rc)
-        return [], {}
+    # Pass 1: Discover ALL JRA races and horses using Netkeiba
+    # We bypass 0B11 completely because 0B11 (Real-time weights) only publishes 
+    # data 50 minutes before a race, which means a 9:30 AM run only discovers Race 1!
+    log.info("JV-Link: Fetching full JRA race and horse list from Netkeiba (bypassing 0B11 limitation)...")
     
-    try:
-        while True:
-            rc, buff, size, filename = jvlink.JVRead("", _RECORD_BUFFER, "")
-            if rc == 0: break
-            if rc < 0 and rc not in (-1, -3): break
-            if rc in (-1, -3): 
-                time.sleep(0.5)
-                continue
-            
-            if not buff: continue
-            
-            idx = 0
-            while idx < len(buff):
-                wh_idx = buff.find("WH", idx)
-                if wh_idx == -1:
-                    break
-                
-                # Ensure we have enough buffer left to read the fields
-                if wh_idx + 55 > len(buff):
-                    break
-                    
-                venue_code = buff[wh_idx+19 : wh_idx+21]
-                race_num_str = buff[wh_idx+25 : wh_idx+27]
-                horse_num_str = buff[wh_idx+35 : wh_idx+37]
-                horse_name_raw = buff[wh_idx+37 : wh_idx+55]
-                race_key = buff[wh_idx+11 : wh_idx+27]
-                
-                idx = wh_idx + 70 # Move past this record so we find the next WH
-                
-                if not race_num_str.isdigit() or not horse_num_str.isdigit(): continue
-                race_number = int(race_num_str)
-                horse_number = int(horse_num_str)
-                
-                try:
-                    horse_name = horse_name_raw.encode("latin-1").decode("cp932").strip()
-                except Exception:
-                    horse_name = horse_name_raw.strip()
-                    
-                venue_name = _VENUE_CODE_MAP.get(venue_code, venue_code)
-                race_id = f"{date_key[:4]}-{date_key[4:6]}-{date_key[6:8]}_{venue_code}_{race_number:02d}"
-                horse_id = f"{race_id}_H{horse_number:02d}"
-                
-                if race_id not in horses_by_race:
-                    races_dict[race_id] = {
-                        "race_id": race_id,
-                        "race_name": f"{venue_name}{race_number}R",
-                        "race_date": race_date,
-                        "venue": venue_name,
-                        "race_number": race_number,
-                    }
-                    horses_by_race[race_id] = []
-                    race_keys.add(race_key)
-                    
-                horses_by_race[race_id].append({
-                    "horse_id": horse_id,
-                    "race_id": race_id,
-                    "horse_name": horse_name,
-                    "horse_number": horse_number,
-                    "odds": 0.0, # Will populate in pass 2
-                })
-    finally:
-        jvlink.JVClose()
-        
-    # --- FIX: 0B11 (Horse Weights) is only returning 1 horse per race. ---
-    # We use Netkeiba to reliably populate the full horse list (with names) 
-    # before updating their odds with the official 0B31 stream.
-    log.info("JV-Link: Fetching full JRA horse list from Netkeiba to supplement missing names...")
+    races_dict = {}
+    horses_by_race = {}
+    race_keys = set()
+    
     try:
         from fetcher.netkeiba_fallback import scrape_jra_races_and_odds
         nk_races, nk_horses = scrape_jra_races_and_odds(race_date)
-        for rid, h_list in nk_horses.items():
-            if rid in horses_by_race:
-                horses_by_race[rid] = h_list
+        
+        if not nk_races:
+            log.warning("JV-Link: No JRA races found via Netkeiba for %s. Skipping JRA.", race_date)
+            return [], {}
+            
+        for nk_r in nk_races:
+            rid = nk_r["race_id"]
+            races_dict[rid] = nk_r
+            horses_by_race[rid] = nk_horses.get(rid, [])
+            
+            if "jvlink_race_key" in nk_r:
+                race_keys.add(nk_r["jvlink_race_key"])
                 
-                # Also update race names if they are better
-                for nk_r in nk_races:
-                    if nk_r["race_id"] == rid and rid in races_dict:
-                        races_dict[rid]["race_name"] = nk_r["race_name"]
-                        break
-        log.info("JV-Link: Successfully merged full horse lists for %d races.", len(nk_horses))
+        log.info("JV-Link: Successfully initialized %d JRA races.", len(races_dict))
     except Exception as e:
-        log.warning("JV-Link: Failed to merge Netkeiba horse lists: %s", e)
+        log.error("JV-Link: Failed to initialize JRA races via Netkeiba: %s", e)
+        return [], {}
 
     # Pass 2: Fetch 0B31 (Odds) for each discovered race
     log.info("JV-Link: fetching odds from 0B31 for %d races...", len(race_keys))
@@ -221,7 +161,8 @@ def _jvlink_fetch(race_date: str):
                         # Find this horse and update odds
                         for horse in horses_by_race.get(race_id, []):
                             if horse["horse_number"] == h_num:
-                                horse["odds"] = odds_val
+                                if odds_val > 0:
+                                    horse["odds"] = odds_val
                                 break
                                 
                     idx = o1_idx + 180 # Move past this record
