@@ -230,6 +230,9 @@ def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
                                 self.current_umaban = None
                                 self.current_horse_name = None
 
+                from fetcher.http_utils import get_robust_session
+                session = get_robust_session()
+
                 # NetKeiba NAR Race ID format: YYYY + venue_code + MMDD + race_number(2 digits)
                 nk_date = target_date.replace('-', '')
                 
@@ -238,7 +241,7 @@ def _parse_h1_record(buff: str, target_date: str) -> tuple[dict|None, list]:
                 nk_race_id = f"{nk_date[:4]}{nk_venue_code}{nk_date[4:8]}{race_number:02d}"
                 nk_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={nk_race_id}"
                 
-                resp = requests.get(nk_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=5)
+                resp = session.get(nk_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=10)
                 if resp.ok:
                     parser = NetkeibaParser()
                     parser.feed(resp.text)

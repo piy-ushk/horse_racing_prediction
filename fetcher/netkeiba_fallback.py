@@ -105,36 +105,38 @@ def scrape_races_and_odds(race_date: str) -> tuple[list, dict]:
     races_list = []
     horses_by_race = {}
     
-    # 1. We iterate over all 15 venues. For each venue, we probe race 1 to see if it's active today.
+    from fetcher.http_utils import get_robust_session
+    session = get_robust_session()
+    
+    # 1. We iterate over all 15 venues.
     for venue_code, venue_name in _VENUE_CODE_MAP.items():
         # Exception: JV-Data uses "33" for Obihiro, but NetKeiba uses "03"
         nk_venue_code = "03" if venue_code == "33" else venue_code
         
-        race_number = 1
-        consecutive_failures = 0
-        
-        while race_number <= 12:  # max 12 races usually
+        # Fast check: if Race 1 doesn't exist, the venue is almost certainly not racing today.
+        first_race_id = f"{date_str[:4]}{nk_venue_code}{date_str[4:8]}01"
+        try:
+            r1 = session.get(f"https://nar.netkeiba.com/race/shutuba.html?race_id={first_race_id}", headers=headers, timeout=5)
+            if not r1.ok:
+                continue # Skip closed venue
+        except Exception:
+            continue
+            
+        for race_number in range(1, 13):
             nk_race_id = f"{date_str[:4]}{nk_venue_code}{date_str[4:8]}{race_number:02d}"
             url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={nk_race_id}"
             
             try:
-                resp = requests.get(url, headers=headers, timeout=5)
+                resp = session.get(url, headers=headers, timeout=10)
                 if not resp.ok:
-                    consecutive_failures += 1
-                    break
+                    continue
                     
                 parser = NetkeibaOddsParser()
                 parser.feed(resp.text)
                 
                 if not parser.horses:
-                    consecutive_failures += 1
-                    if consecutive_failures >= 2: # Stop after 2 missing races
-                        break
-                    race_number += 1
                     continue
                     
-                # We found horses! This means the race is active.
-                consecutive_failures = 0
                 race_id = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}_{venue_code}_{race_number:02d}"
                 
                 race_info = {
@@ -164,11 +166,7 @@ def scrape_races_and_odds(race_date: str) -> tuple[list, dict]:
                 
             except Exception as e:
                 log.warning("Netkeiba Fallback: Error scraping %s: %s", nk_race_id, e)
-                consecutive_failures += 1
-                if consecutive_failures >= 2:
-                    break
                     
-            race_number += 1
             time.sleep(0.5) # Be polite
             
     log.info("Netkeiba Fallback: Completed direct scrape. Found %d local races total.", len(races_list))
@@ -192,10 +190,13 @@ def scrape_jra_races_and_odds(race_date: str) -> tuple[list, dict]:
     date_str = race_date.replace('-', '')
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"}
     
+    from fetcher.http_utils import get_robust_session
+    session = get_robust_session()
+    
     # 1. Fetch JRA race list subpage for the date
     url = f"https://race.netkeiba.com/top/race_list_sub.html?kaisai_date={date_str}"
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = session.get(url, headers=headers, timeout=10)
         if not resp.ok:
             log.warning("Netkeiba JRA Fallback: Failed to fetch JRA race list subpage. Code: %d", resp.status_code)
             return [], {}
@@ -226,7 +227,7 @@ def scrape_jra_races_and_odds(race_date: str) -> tuple[list, dict]:
         race_num = int(rid[10:12])
         
         try:
-            r_resp = requests.get(race_url, headers=headers, timeout=5)
+            r_resp = session.get(race_url, headers=headers, timeout=10)
             if not r_resp.ok:
                 log.warning("Netkeiba JRA Fallback: Failed to fetch race details for %s", rid)
                 continue
