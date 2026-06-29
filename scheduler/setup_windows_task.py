@@ -23,7 +23,7 @@ PYTHON_EXE = sys.executable
 import tempfile
 import xml.etree.ElementTree as ET
 
-def create_task(hour: int = None, minute: int = None) -> bool:
+def create_task(hour: int | None = None, minute: int | None = None) -> bool:
     if hour is None or minute is None:
         hour, minute = config.get_schedule()
     time_str = f"{hour:02d}:{minute:02d}"

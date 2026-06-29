@@ -140,8 +140,10 @@ def _build_daily_master_html(all_predictions: list, horses_by_id: dict, race_dat
 
 
 def _post_to_wordpress(race_date: str, html_content: str) -> dict:
-    import requests
+    from fetcher.http_utils import get_robust_session
     from requests.auth import HTTPBasicAuth
+    
+    session = get_robust_session(retries=3, backoff_factor=2.0)
 
     slug = f"predictions-{race_date}"
     title = f"{race_date} 本日の全レース予想"
@@ -149,8 +151,13 @@ def _post_to_wordpress(race_date: str, html_content: str) -> dict:
     auth = HTTPBasicAuth(config.WP_USERNAME, config.WP_APP_PASSWORD)
 
     # Check if page already exists
-    resp = requests.get(endpoint, params={"slug": slug}, auth=auth, timeout=15)
-    existing = resp.json() if resp.ok else []
+    try:
+        resp = session.get(endpoint, params={"slug": slug}, auth=auth, timeout=15)
+        existing = resp.json() if resp.ok else []
+    except Exception as e:
+        log.warning("WordPress: Error checking existing page: %s", e)
+        existing = []
+        
     page_id = existing[0]["id"] if existing else None
 
     payload = {
@@ -161,18 +168,22 @@ def _post_to_wordpress(race_date: str, html_content: str) -> dict:
         "meta": {"_yoast_wpseo_meta-robots-noindex": "1"},
     }
 
-    if page_id:
-        resp = requests.post(f"{endpoint}/{page_id}", json=payload, auth=auth, timeout=15)
-        log.info("WordPress: updated master page id=%d  slug=%s", page_id, slug)
-    else:
-        resp = requests.post(endpoint, json=payload, auth=auth, timeout=15)
-        log.info("WordPress: created new master page  slug=%s", slug)
-
-    resp.raise_for_status()
-    page_data = resp.json()
-    page_url = f"{config.WP_BASE_URL.rstrip('/')}/{slug}?{config.AUTH_PARAM}={config.AUTH_VALUE}"
-    log.info("WordPress: master page URL → %s", page_url)
-    return {"wp_page_id": page_data["id"], "wp_page_url": page_url}
+    try:
+        if page_id:
+            resp = session.post(f"{endpoint}/{page_id}", json=payload, auth=auth, timeout=30)
+            log.info("WordPress: updated master page id=%d  slug=%s", page_id, slug)
+        else:
+            resp = session.post(endpoint, json=payload, auth=auth, timeout=30)
+            log.info("WordPress: created new master page  slug=%s", slug)
+            
+        resp.raise_for_status()
+        page_data = resp.json()
+        page_url = f"{config.WP_BASE_URL.rstrip('/')}/{slug}?{config.AUTH_PARAM}={config.AUTH_VALUE}"
+        log.info("WordPress: master page URL → %s", page_url)
+        return {"wp_page_id": page_data["id"], "wp_page_url": page_url}
+    except Exception as e:
+        log.error("WordPress: Failed to publish page: %s", e)
+        return {}
 
 
 def _write_static_html(race_date: str, html_content: str) -> dict:

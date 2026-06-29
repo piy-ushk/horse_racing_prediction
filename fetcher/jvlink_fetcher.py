@@ -112,9 +112,20 @@ def _jvlink_fetch(race_date: str):
         r_num = int(r_key[14:16])
         race_id = f"{date_key[:4]}-{date_key[4:6]}-{date_key[6:8]}_{v_code}_{r_num:02d}"
         
-        rc = jvlink.JVRTOpen("0B31", r_key)
+        rc = -1
+        retry_count = 0
+        while retry_count < 3:
+            rc = jvlink.JVRTOpen("0B31", r_key)
+            if rc >= 0:
+                break
+            if rc in (-1, -3):
+                time.sleep(1.0)
+                retry_count += 1
+            else:
+                break
+                
         if rc < 0:
-            log.debug("JV-Link: JVRTOpen(0B31) failed for %s", r_key)
+            log.warning("JV-Link: JVRTOpen(0B31) failed for %s (code %d)", r_key, rc)
             continue
             
         try:
